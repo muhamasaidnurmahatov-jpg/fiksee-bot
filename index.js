@@ -2,31 +2,20 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const OpenAI = require('openai');
 
+// Инициализация бота
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
-// 🧠 память: chatId -> история сообщений
+// Инициализация OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_KEY
+});
+
+// Память: chatId -> история сообщений
 const memory = {};
+const MAX_HISTORY = 4; // ограничиваем историю для надежности
 
-// сколько сообщений хранить
-const MAX_HISTORY = 6;
-
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  if (!text) return;
-
-  // команды не отправляем в ИИ
-  if (text.startsWith('/')) {
-    if (text === '/reset') {
-      delete memory[chatId];
-      return bot.sendMessage(chatId, 'Память очищена 🧹');
-    }
-    return;
-  }
-
-  // если нет истории — создаём
+// Функция для безопасного вызова OpenAI
+async function askOpenAI(chatId, userMessage) {
   if (!memory[chatId]) {
     memory[chatId] = [
       { role: 'system', content: 'Ты дружелюбный Telegram-бот помощник' }
@@ -34,11 +23,11 @@ bot.on('message', async (msg) => {
   }
 
   // добавляем сообщение пользователя
-  memory[chatId].push({ role: 'user', content: text });
+  memory[chatId].push({ role: 'user', content: userMessage });
 
   // обрезаем историю
-  if (memory[chatId].length > MAX_HISTORY) {
-    memory[chatId].splice(1, 1);
+  if (memory[chatId].length > MAX_HISTORY + 1) { 
+    memory[chatId].splice(1, memory[chatId].length - MAX_HISTORY - 1);
   }
 
   try {
@@ -52,11 +41,30 @@ bot.on('message', async (msg) => {
     // сохраняем ответ ИИ
     memory[chatId].push({ role: 'assistant', content: answer });
 
-    bot.sendMessage(chatId, answer);
-  } catch (e) {
-    console.error(e);
-    bot.sendMessage(chatId, 'Ошибка 😢');
+    return answer;
+  } catch (err) {
+    console.error('OpenAI Error:', err);
+    return 'Ошибка связи с ИИ 😢 Попробуй ещё раз.';
   }
+}
+
+// Обработка сообщений
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text;
+
+  if (!text) return;
+
+  // команды
+  if (text.startsWith('/')) {
+    if (text === '/reset') {
+      delete memory[chatId];
+      return bot.sendMessage(chatId, 'Память очищена 🧹');
+    }
+    return;
+  }
+
+  // ответ через OpenAI
+  const reply = await askOpenAI(chatId, text);
+  bot.sendMessage(chatId, reply);
 });
-
-
