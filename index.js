@@ -1,70 +1,136 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const OpenAI = require('openai');
+const axios = require('axios');
+const cron = require('node-cron');
+const fs = require('fs');
 
-// Инициализация бота
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
-// Инициализация OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_KEY
-});
-
-// Память: chatId -> история сообщений
+// ===== MEMORY =====
 const memory = {};
-const MAX_HISTORY = 4; // ограничиваем историю для надежности
+const todos = {};
+const reminders = {};
 
-// Функция для безопасного вызова OpenAI
-async function askOpenAI(chatId, userMessage) {
-  if (!memory[chatId]) {
-    memory[chatId] = [
-      { role: 'system', content: 'Ты дружелюбный Telegram-бот помощник' }
-    ];
-  }
+// ===== HELPERS =====
+const isTikTok = (t) => t.includes('tiktok.com');
 
-  // добавляем сообщение пользователя
-  memory[chatId].push({ role: 'user', content: userMessage });
-
-  // обрезаем историю
-  if (memory[chatId].length > MAX_HISTORY + 1) { 
-    memory[chatId].splice(1, memory[chatId].length - MAX_HISTORY - 1);
-  }
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      messages: memory[chatId]
-    });
-
-    const answer = response.choices[0].message.content;
-
-    // сохраняем ответ ИИ
-    memory[chatId].push({ role: 'assistant', content: answer });
-
-    return answer;
-  } catch (err) {
-    console.error('OpenAI Error:', err);
-    return 'Ошибка связи с ИИ 😢 Попробуй ещё раз.';
-  }
+// ===== WEATHER =====
+async function getWeather(city) {
+  const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&lang=ru&appid=${process.env.WEATHER_KEY}`;
+  const { data } = await axios.get(url);
+  return `🌤 ${data.name}: ${data.main.temp}°C, ${data.weather[0].description}`;
 }
 
-// Обработка сообщений
+// ===== AI CHAT =====
+async function askAI(chatId, text) {
+  if (!memory[chatId]) {
+    memory[chatId] = [{ role: 'system', content: 'Ты полезный Telegram-бот помощник' }];
+  }
+
+  memory[chatId].push({ role: 'user', content: text });
+  if (memory[chatId].length > 6) memory[chatId].splice(1, 1);
+
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4.1-mini',
+    messages: memory[chatId]
+  });
+
+  const answer = res.choices[0].message.content;
+  memory[chatId].push({ role: 'assistant', content: answer });
+  return answer;
+}
+
+// ===== VOICE =====
+bot.on('voice', async (msg) => {
+  const chatId = msg.chat.id;
+  const fileId = msg.voice.file_id;
+  const filePath = await bot.downloadFile(fileId, './');
+
+  const transcript = await openai.audio.transcriptions.create({
+    file: fs.createReadStream(filePath),
+    model: 'gpt-4o-transcribe'
+  });
+
+  const answer = await askAI(chatId, transcript.text);
+
+  const speech = await openai.audio.speech.create({
+    model: 'gpt-4o-mini-tts',
+    voice: 'alloy',
+    input: answer
+  });
+
+  const buffer = Buffer.from(await speech.arrayBuffer());
+  fs.writeFileSync('reply.ogg', buffer);
+
+  bot.sendVoice(chatId, 'reply.ogg');
+});
+
+// ===== PHOTO =====
+bot.on('photo', async (msg) => {
+  const chatId = msg.chat.id;
+  const photo = msg.photo.pop();
+  const filePath = await bot.downloadFile(photo.file_id, './');
+
+  const res = await openai.responses.create({
+    model: 'gpt-4.1-mini',
+    input: [{
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'Опиши изображение' },
+        { type: 'input_image', image_url: `file://${filePath}` }
+      ]
+    }]
+  });
+
+  bot.sendMessage(chatId, res.output_text);
+});
+
+// ===== TEXT =====
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
-
   if (!text) return;
 
-  // команды
-  if (text.startsWith('/')) {
-    if (text === '/reset') {
-      delete memory[chatId];
-      return bot.sendMessage(chatId, 'Память очищена 🧹');
-    }
-    return;
+  // --- WEATHER ---
+  if (text.startsWith('погода')) {
+    const city = text.split(' ').slice(1).join(' ');
+    return bot.sendMessage(chatId, await getWeather(city));
   }
 
-  // ответ через OpenAI
-  const reply = await askOpenAI(chatId, text);
+  // --- TODO ---
+  if (text.startsWith('добавь задачу')) {
+    const task = text.replace('добавь задачу', '').trim();
+    todos[chatId] = todos[chatId] || [];
+    todos[chatId].push(task);
+    return bot.sendMessage(chatId, '✅ Задача добавлена');
+  }
+
+  if (text === 'мои задачи') {
+    return bot.sendMessage(chatId, todos[chatId]?.join('\n') || '📭 Пусто');
+  }
+
+  // --- REMINDER ---
+  if (text.startsWith('напомни')) {
+    const [_, time, ...msgText] = text.split(' ');
+    cron.schedule(time, () => {
+      bot.sendMessage(chatId, `⏰ Напоминание: ${msgText.join(' ')}`);
+    });
+    return bot.sendMessage(chatId, '⏰ Напоминание установлено');
+  }
+
+  // --- TIKTOK ---
+  if (isTikTok(text)) {
+    const api = `https://tikwm.com/api/?url=${encodeURIComponent(text)}`;
+    const { data } = await axios.get(api);
+    return bot.sendVideo(chatId, data.data.play);
+  }
+
+  // --- AI ---
+  const reply = await askAI(chatId, text);
   bot.sendMessage(chatId, reply);
 });
+
+console.log('🤖 Bot started');
+
