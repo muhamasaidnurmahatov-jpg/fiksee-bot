@@ -93,11 +93,11 @@ bot.on('message', async (msg) => {
   const text = msg.text;
   if (!text) return;
 
-  // --- WEATHER ---
-  if (text.startsWith('погода')) {
-    const city = text.split(' ').slice(1).join(' ');
-    return bot.sendMessage(chatId, await getWeather(city));
-  }
+  // // --- WEATHER ---
+  // if (text.startsWith('погода')) {
+  //   const city = text.split(' ').slice(1).join(' ');
+  //   return bot.sendMessage(chatId, await getWeather(city));
+  // }
 
   // --- TODO ---
   if (text.startsWith('добавь задачу')) {
