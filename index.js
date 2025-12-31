@@ -14,14 +14,7 @@ const todos = {};
 const reminders = {};
 
 // ===== HELPERS =====
-const isTikTok = (t) => t.includes('tiktok.com');
-
-// ===== WEATHER =====
-// async function getWeather(city) {
-//   const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&lang=ru&appid=${process.env.WEATHER_KEY}`;
-//   const { data } = await axios.get(url);
-//   return `🌤 ${data.name}: ${data.main.temp}°C, ${data.weather[0].description}`;
-// }
+const isTikTok = (t) => /tiktok\.com/.test(t);
 
 // ===== AI CHAT =====
 async function askAI(chatId, text) {
@@ -87,21 +80,15 @@ bot.on('photo', async (msg) => {
   bot.sendMessage(chatId, res.output_text);
 });
 
-// ===== TEXT =====
+// ===== TEXT MESSAGES =====
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
   if (!text) return;
 
-  // // --- WEATHER ---
-  // if (text.startsWith('погода')) {
-  //   const city = text.split(' ').slice(1).join(' ');
-  //   return bot.sendMessage(chatId, await getWeather(city));
-  // }
-
   // --- TODO ---
-  if (text.startsWith('Добавь задачу') || text.startsWith('добавь задачу')) {
-    const task = text.replace('Добавь задачу', '').replace('добавь задачу', '').trim();
+ if (text.startsWith('Добавь задачу') || text.startsWith('добавь задачу')) {
+    const task = text.replace(/добавь задачу/i, '').trim();
     todos[chatId] = todos[chatId] || [];
     todos[chatId].push(task);
     return bot.sendMessage(chatId, '✅ Задача добавлена');
@@ -112,7 +99,7 @@ bot.on('message', async (msg) => {
   }
 
   // --- REMINDER ---
-  if (text.startsWith('Напомни')) {
+  if (text.toLowerCase().startsWith('напомни')) {
     const [_, time, ...msgText] = text.split(' ');
     cron.schedule(time, () => {
       bot.sendMessage(chatId, `⏰ Напоминание: ${msgText.join(' ')}`);
@@ -120,20 +107,26 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, '⏰ Напоминание установлено');
   }
 
- // --- TIKTOK ---
-if (isTikTok(text)) {
-  return bot.sendMessage(chatId, 'Выбери действие..', {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: 'Видео / Фото 📹', callback_data: `video|${text}` },
-          { text: 'Скачать звук 🎵', callback_data: `audio|${text}` }
+  // --- TIKTOK ---
+  if (isTikTok(text)) {
+    return bot.sendMessage(chatId, 'Выбери действие..', {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'Видео / Фото 📹', callback_data: `video|${text}` },
+            { text: 'Скачать звук 🎵', callback_data: `audio|${text}` }
+          ]
         ]
-      ]
-    }
-  });
-}
+      }
+    });
+  }
 
+  // --- AI ---
+  const reply = await askAI(chatId, text);
+  bot.sendMessage(chatId, reply);
+});
+
+// ===== CALLBACK QUERY =====
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const [type, url] = query.data.split('|');
@@ -156,11 +149,4 @@ bot.on('callback_query', async (query) => {
   }
 });
 
-
-  // --- AI ---
-  const reply = await askAI(chatId, text);
-  bot.sendMessage(chatId, reply);
-});
-
 console.log('🤖 Bot started');
-
