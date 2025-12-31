@@ -100,19 +100,19 @@ bot.on('message', async (msg) => {
   // }
 
   // --- TODO ---
-  if (text.startsWith('добавь задачу')) {
-    const task = text.replace('добавь задачу', '').trim();
+  if (text.startsWith('Добавь задачу') || text.startsWith('добавь задачу')) {
+    const task = text.replace('Добавь задачу', '').replace('добавь задачу', '').trim();
     todos[chatId] = todos[chatId] || [];
     todos[chatId].push(task);
     return bot.sendMessage(chatId, '✅ Задача добавлена');
   }
 
-  if (text === 'мои задачи') {
+  if (text === 'Мои задачи' || text === 'мои задачи') {
     return bot.sendMessage(chatId, todos[chatId]?.join('\n') || '📭 Пусто');
   }
 
   // --- REMINDER ---
-  if (text.startsWith('напомни')) {
+  if (text.startsWith('Напомни')) {
     const [_, time, ...msgText] = text.split(' ');
     cron.schedule(time, () => {
       bot.sendMessage(chatId, `⏰ Напоминание: ${msgText.join(' ')}`);
@@ -121,11 +121,43 @@ bot.on('message', async (msg) => {
   }
 
   // --- TIKTOK ---
-  if (isTikTok(text)) {
-    const api = `https://tikwm.com/api/?url=${encodeURIComponent(text)}`;
-    const { data } = await axios.get(api);
-    return bot.sendVideo(chatId, data.data.play);
+if (isTikTok(text)) {
+  const chatId = msg.chat.id;
+
+  // Создаем inline кнопки
+  const opts = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "Видео/Фото 📷", callback_data: `video|${text}` },
+          { text: "Скачать звук 🎵", callback_data: `audio|${text}` }
+        ]
+      ]
+    }
+  };
+
+  // Отправляем сообщение с кнопками
+  return bot.sendMessage(chatId, "Выбери действие..", opts);
+}
+
+// Обработка нажатий на кнопки
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const [action, url] = query.data.split('|');
+
+  const api = `https://tikwm.com/api/?url=${encodeURIComponent(url)}`;
+  const { data } = await axios.get(api);
+
+  if (action === 'video') {
+    bot.sendVideo(chatId, data.data.play);
+  } else if (action === 'audio') {
+    bot.sendAudio(chatId, data.data.audio[0]?.play || data.data.audio); // зависит от структуры API
   }
+
+  // Убираем "часики" Telegram
+  bot.answerCallbackQuery(query.id);
+});
+
 
   // --- AI ---
   const reply = await askAI(chatId, text);
