@@ -4,6 +4,7 @@ const OpenAI = require('openai');
 const axios = require('axios');
 const cron = require('node-cron');
 const fs = require('fs');
+const path = require('path');
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
@@ -62,22 +63,34 @@ bot.on('voice', async (msg) => {
 
 // ===== PHOTO =====
 bot.on('photo', async (msg) => {
-  const chatId = msg.chat.id;
-  const photo = msg.photo.pop();
-  const filePath = await bot.downloadFile(photo.file_id, './');
+  try {
+    const chatId = msg.chat.id;
+    const photo = msg.photo.pop(); // берём самую большую версию
+    const filePath = await bot.downloadFile(photo.file_id, './');
+    
+    // сохраняем с правильным расширением
+    const ext = path.extname(filePath) || '.jpg';
+    const newPath = `photo_${Date.now()}${ext}`;
+    fs.renameSync(filePath, newPath);
 
-  const res = await openai.responses.create({
-    model: 'gpt-4.1-mini',
-    input: [{
-      role: 'user',
-      content: [
-        { type: 'input_text', text: 'Опиши изображение' },
-        { type: 'input_image', image_url: `file://${filePath}` }
-      ]
-    }]
-  });
+    const res = await openai.responses.create({
+      model: 'gpt-4.1-mini',
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Опиши изображение' },
+          { type: 'input_image', image_url: `file://${path.resolve(newPath)}` }
+        ]
+      }]
+    });
 
-  bot.sendMessage(chatId, res.output_text);
+    bot.sendMessage(chatId, res.output_text);
+
+    // удаляем локальный файл после обработки
+    fs.unlinkSync(newPath);
+  } catch (err) {
+    console.log(err);
+  }
 });
 
 // ===== TEXT MESSAGES =====
@@ -94,12 +107,12 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, '✅ Задача добавлена');
   }
 
-  if (text === 'Мои задачи' || text === 'мои задачи') {
+ if (text === 'Мои задачи' || text === 'мои задачи') {
     return bot.sendMessage(chatId, todos[chatId]?.join('\n') || '📭 Пусто');
   }
 
   // --- REMINDER ---
-  if (text.toLowerCase().startsWith('напомни')) {
+  if (text.startsWith('Напомни') || text.startsWith('напомни')) {
     const [_, time, ...msgText] = text.split(' ');
     cron.schedule(time, () => {
       bot.sendMessage(chatId, `⏰ Напоминание: ${msgText.join(' ')}`);
@@ -129,6 +142,7 @@ bot.on('message', async (msg) => {
 // ===== CALLBACK QUERY =====
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
+  const messageId = query.message.message_id; // ID кнопки
   const [type, url] = query.data.split('|');
 
   try {
@@ -143,12 +157,13 @@ bot.on('callback_query', async (query) => {
       await bot.sendAudio(chatId, data.data.music);
     }
 
-    // Удаляем сообщение с кнопкой после отправки
+    // удаляем сообщение с кнопкой после отправки
     await bot.deleteMessage(chatId, messageId);
 
     bot.answerCallbackQuery(query.id);
   } catch (err) {
     bot.sendMessage(chatId, '❌ Ошибка при загрузке');
+    console.log(err);
   }
 });
 
