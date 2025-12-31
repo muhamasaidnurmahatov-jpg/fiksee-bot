@@ -17,11 +17,11 @@ const reminders = {};
 const isTikTok = (t) => t.includes('tiktok.com');
 
 // ===== WEATHER =====
-async function getWeather(city) {
-  const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&lang=ru&appid=${process.env.WEATHER_KEY}`;
-  const { data } = await axios.get(url);
-  return `🌤 ${data.name}: ${data.main.temp}°C, ${data.weather[0].description}`;
-}
+// async function getWeather(city) {
+//   const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&lang=ru&appid=${process.env.WEATHER_KEY}`;
+//   const { data } = await axios.get(url);
+//   return `🌤 ${data.name}: ${data.main.temp}°C, ${data.weather[0].description}`;
+// }
 
 // ===== AI CHAT =====
 async function askAI(chatId, text) {
