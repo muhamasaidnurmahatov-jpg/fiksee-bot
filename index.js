@@ -120,42 +120,40 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, '⏰ Напоминание установлено');
   }
 
-  // --- TIKTOK ---
+ // --- TIKTOK ---
 if (isTikTok(text)) {
-  const chatId = msg.chat.id;
-
-  // Создаем inline кнопки
-  const opts = {
+  return bot.sendMessage(chatId, 'Выбери действие..', {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "Видео/Фото 📷", callback_data: `video|${text}` },
-          { text: "Скачать звук 🎵", callback_data: `audio|${text}` }
+          { text: 'Видео / Фото 📹', callback_data: `video|${text}` },
+          { text: 'Скачать звук 🎵', callback_data: `audio|${text}` }
         ]
       ]
     }
-  };
-
-  // Отправляем сообщение с кнопками
-  return bot.sendMessage(chatId, "Выбери действие..", opts);
+  });
 }
 
-// Обработка нажатий на кнопки
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
-  const [action, url] = query.data.split('|');
+  const [type, url] = query.data.split('|');
 
-  const api = `https://tikwm.com/api/?url=${encodeURIComponent(url)}`;
-  const { data } = await axios.get(api);
+  try {
+    const api = `https://tikwm.com/api/?url=${encodeURIComponent(url)}`;
+    const { data } = await axios.get(api);
 
-  if (action === 'video') {
-    bot.sendVideo(chatId, data.data.play);
-  } else if (action === 'audio') {
-    bot.sendAudio(chatId, data.data.audio[0]?.play || data.data.audio); // зависит от структуры API
+    if (type === 'video') {
+      await bot.sendVideo(chatId, data.data.play);
+    }
+
+    if (type === 'audio') {
+      await bot.sendAudio(chatId, data.data.music);
+    }
+
+    bot.answerCallbackQuery(query.id);
+  } catch (err) {
+    bot.sendMessage(chatId, '❌ Ошибка при загрузке');
   }
-
-  // Убираем "часики" Telegram
-  bot.answerCallbackQuery(query.id);
 });
 
 
