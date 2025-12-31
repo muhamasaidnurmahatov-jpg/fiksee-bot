@@ -143,6 +143,9 @@ bot.on('callback_query', async (query) => {
       await bot.sendAudio(chatId, data.data.music);
     }
 
+    // Удаляем сообщение с кнопкой после отправки
+    await bot.deleteMessage(chatId, messageId);
+
     bot.answerCallbackQuery(query.id);
   } catch (err) {
     bot.sendMessage(chatId, '❌ Ошибка при загрузке');
