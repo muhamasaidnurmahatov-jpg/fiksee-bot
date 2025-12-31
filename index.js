@@ -65,10 +65,9 @@ bot.on('voice', async (msg) => {
 bot.on('photo', async (msg) => {
   try {
     const chatId = msg.chat.id;
-    const photo = msg.photo.pop(); // берём самую большую версию
+    const photo = msg.photo.pop(); // берем самую большую версию
     const filePath = await bot.downloadFile(photo.file_id, './');
-    
-    // сохраняем с правильным расширением
+
     const ext = path.extname(filePath) || '.jpg';
     const newPath = `photo_${Date.now()}${ext}`;
     fs.renameSync(filePath, newPath);
@@ -85,8 +84,6 @@ bot.on('photo', async (msg) => {
     });
 
     bot.sendMessage(chatId, res.output_text);
-
-    // удаляем локальный файл после обработки
     fs.unlinkSync(newPath);
   } catch (err) {
     console.log(err);
@@ -100,14 +97,14 @@ bot.on('message', async (msg) => {
   if (!text) return;
 
   // --- TODO ---
- if (text.startsWith('Добавь задачу') || text.startsWith('добавь задачу')) {
+ if (text.startsWith('Добавь задачу') || text.startsWith('добавь задачу')){
     const task = text.replace(/добавь задачу/i, '').trim();
     todos[chatId] = todos[chatId] || [];
     todos[chatId].push(task);
     return bot.sendMessage(chatId, '✅ Задача добавлена');
   }
 
- if (text === 'Мои задачи' || text === 'мои задачи') {
+  if (text === 'Мои задачи' || text === 'мои задачи') {
     return bot.sendMessage(chatId, todos[chatId]?.join('\n') || '📭 Пусто');
   }
 
@@ -142,27 +139,75 @@ bot.on('message', async (msg) => {
 // ===== CALLBACK QUERY =====
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
-  const messageId = query.message.message_id; // ID кнопки
+  const messageId = query.message.message_id;
   const [type, url] = query.data.split('|');
 
   try {
     const api = `https://tikwm.com/api/?url=${encodeURIComponent(url)}`;
     const { data } = await axios.get(api);
 
-    if (type === 'video') {
-      await bot.sendVideo(chatId, data.data.play);
+    // --- Видео ---
+    if (data.data.play) {
+      const videoUrl = data.data.play;
+      const videoPath = `tt_video_${Date.now()}.mp4`;
+
+      const videoResp = await axios.get(videoUrl, { responseType: 'stream' });
+      const writer = fs.createWriteStream(videoPath);
+      videoResp.data.pipe(writer);
+
+      await new Promise((res, rej) => {
+        writer.on('finish', res);
+        writer.on('error', rej);
+      });
+
+      await bot.sendVideo(chatId, videoPath);
+      fs.unlinkSync(videoPath);
     }
 
-    if (type === 'audio') {
-      await bot.sendAudio(chatId, data.data.music);
+    // --- Фото / миниатюры ---
+    if (data.data.images && data.data.images.length > 0) {
+      for (const [i, imgUrl] of data.data.images.entries()) {
+        const ext = path.extname(imgUrl) || '.jpg';
+        const imgPath = `tt_img_${Date.now()}_${i}${ext}`;
+
+        const imgResp = await axios.get(imgUrl, { responseType: 'stream' });
+        const imgWriter = fs.createWriteStream(imgPath);
+        imgResp.data.pipe(imgWriter);
+
+        await new Promise((res, rej) => {
+          imgWriter.on('finish', res);
+          imgWriter.on('error', rej);
+        });
+
+        await bot.sendPhoto(chatId, imgPath);
+        fs.unlinkSync(imgPath);
+      }
     }
 
-    // удаляем сообщение с кнопкой после отправки
+    // --- Аудио ---
+    if (type === 'audio' && data.data.music) {
+      const audioUrl = data.data.music;
+      const audioPath = `tt_audio_${Date.now()}.mp3`;
+
+      const audioResp = await axios.get(audioUrl, { responseType: 'stream' });
+      const audioWriter = fs.createWriteStream(audioPath);
+      audioResp.data.pipe(audioWriter);
+
+      await new Promise((res, rej) => {
+        audioWriter.on('finish', res);
+        audioWriter.on('error', rej);
+      });
+
+      await bot.sendAudio(chatId, audioPath);
+      fs.unlinkSync(audioPath);
+    }
+
+    // Удаляем сообщение с кнопкой
     await bot.deleteMessage(chatId, messageId);
-
     bot.answerCallbackQuery(query.id);
+
   } catch (err) {
-    bot.sendMessage(chatId, '❌ Ошибка при загрузке');
+    bot.sendMessage(chatId, '❌ Ошибка при загрузке TikTok');
     console.log(err);
   }
 });
